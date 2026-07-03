@@ -640,18 +640,28 @@ function reloadData(){
     return fetchSheetJSON(s).catch(function(e){errores.push(s);return[];});
   })).then(function(results){
     hideLoading();
-    if(errores.length===sheets.length){
-      setCfgStatus('❌ No se pudo conectar. El Sheet debe ser público (Compartir → Cualquier persona con el enlace → Lector).','var(--red)');
-      document.getElementById('sync-bar').textContent='❌ Sin conexión';
-      return;
-    }
+    // Siempre intentar parsear y renderizar aunque haya errores parciales
     parseAll(results);
     var ok=sheets.length-errores.length;
     var t=new Date().toLocaleTimeString('es-MX');
-    setCfgStatus(ok===sheets.length?'✅ '+ok+'/8 hojas — '+t:'⚠️ '+ok+'/8 hojas. Sin datos en: '+errores.join(', '),ok===sheets.length?'var(--green)':'var(--amber)');
-    document.getElementById('sync-bar').textContent='Actualizado '+t;
-    document.getElementById('dash-banner').classList.add('hidden');
+
+    if(errores.length===sheets.length){
+      setCfgStatus('❌ No se pudo conectar al Sheet. Verifica que sea público: Compartir → Cualquier persona con el enlace → Lector.','var(--red)');
+      document.getElementById('sync-bar').textContent='❌ Sin conexión al Sheet';
+    } else {
+      var msg=ok===sheets.length?'✅ '+ok+'/8 hojas — '+t:'⚠️ '+ok+'/8 cargadas. Error en: '+errores.join(', ')+' — '+t;
+      setCfgStatus(msg,ok===sheets.length?'var(--green)':'var(--amber)');
+      document.getElementById('sync-bar').textContent='Actualizado '+t;
+      document.getElementById('dash-banner').classList.add('hidden');
+    }
+
+    // Siempre renderizar con lo que haya
     renderAll();
+
+    // Debug: mostrar cuántos registros se parsearon
+    console.log('Gastos:', gastos.length, '| Ingresos:', ingresos.length, '| Fijos:', fijos.length, '| Préstamos:', prestamos.length);
+    console.log('Errores en hojas:', errores);
+    if(results[2]&&results[2].length>0){console.log('Primera fila INGRESOS raw:', results[2][0]);}
   }).catch(function(){hideLoading();setCfgStatus('❌ Error inesperado','var(--red)');});
 }
 
@@ -1105,7 +1115,9 @@ function exportarResumen(){
 /* ══ INIT ══ */
 localStorage.setItem('sid',SHEET_ID);
 document.getElementById('sheet-id-input').value=SHEET_ID;
+// Renderizar dashboard vacío primero para que se vea la UI
 renderDashboard();
+// Luego cargar datos del Sheet
 reloadData();
 </script>
 </body>
