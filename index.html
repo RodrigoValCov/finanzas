@@ -404,12 +404,26 @@ var MXND=function(n){return new Intl.NumberFormat('es-MX',{style:'currency',curr
 var MESES=['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 
 function parseDate(s){
-  if(!s||s===''||s==='Fecha')return null;
+  if(!s||s===''||s==='Fecha'||s==='Date')return null;
   if(s instanceof Date)return isNaN(s)?null:s;
   if(typeof s==='number'){var d=new Date((s-25569)*864e5);return isNaN(d)?null:d;}
   if(typeof s==='string'){
+    s=s.trim();
+    // Formato Google Sheets JSONP: "Date(2026,5,1)"
+    if(s.startsWith('Date(')){
+      var pts=s.replace('Date(','').replace(')','').split(',');
+      var d2=new Date(+pts[0],+pts[1],+pts[2]);return isNaN(d2)?null:d2;
+    }
+    // ISO: "2026-06-01"
+    if(/^\d{4}-\d{2}-\d{2}/.test(s)){var d3=new Date(s+'T12:00:00');return isNaN(d3)?null:d3;}
+    // M/D/YYYY (Google Sheets CSV en inglés): "6/1/2026"
     var p=s.split('/');
-    if(p.length===3){var y=+p[2],m,d2;if(y>1000){m=+p[0]-1;d2=+p[1];}else{d2=+p[0];m=+p[1]-1;y=+p[2];}var dt=new Date(y,m,d2);return isNaN(dt)?null:dt;}
+    if(p.length===3){
+      var y=+p[2],m,d4;
+      if(y>1000){m=+p[0]-1;d4=+p[1];}   // M/D/YYYY
+      else{d4=+p[0];m=+p[1]-1;y=+p[2];} // DD/MM/YYYY
+      var dt=new Date(y,m,d4);return isNaN(dt)?null:dt;
+    }
     var dt2=new Date(s);return isNaN(dt2)?null:dt2;
   }
   return null;
@@ -655,30 +669,48 @@ function parseAll(results){
   });
   if(cfg.nombre)document.getElementById('sb-user').textContent=cfg.nombre;
 
+  // Función robusta para parsear números de Google Sheets
+// Maneja: "15,000.00" / "$15,000" / "15000" / "15.000,00" (europeo) / "15"
+function parseNum(v){
+  if(v===null||v===undefined||v==='')return NaN;
+  var s=String(v).trim();
+  // Quitar símbolo de moneda y espacios
+  s=s.replace(/[$€£¥MXN\s]/g,'');
+  // Detectar formato europeo (punto como separador de miles, coma como decimal)
+  // Ej: "15.000,00" → tiene punto antes de coma
+  if(/\d+\.\d{3},\d{2}$/.test(s)){
+    s=s.replace(/\./g,'').replace(',','.');
+  } else {
+    // Formato anglosajón: quitar comas de miles
+    s=s.replace(/,/g,'');
+  }
+  return parseFloat(s);
+}
+
   gastos=[];
   (results[1]||[]).slice(1).forEach(function(r){
-    var d=parseDate(r[0]),m=parseFloat(String(r[3]||'').replace(/[,$]/g,''));
+    var d=parseDate(r[0]),m=parseNum(r[3]);
     if(!d||isNaN(m)||m===0)return;
     gastos.push({fecha:d,concepto:String(r[1]||'Sin concepto'),cat:String(r[2]||'Otros'),monto:Math.abs(m),q:parseInt(r[4])||0,tipo:String(r[5]||'Variable')});
   });
 
   ingresos=[];
   (results[2]||[]).slice(1).forEach(function(r){
-    var d=parseDate(r[0]),m=parseFloat(String(r[3]||'').replace(/[,$]/g,''));
+    var d=parseDate(r[0]),m=parseNum(r[3]);
     if(!d||isNaN(m)||m===0)return;
     ingresos.push({fecha:d,concepto:String(r[1]||'Sin concepto'),cat:String(r[2]||'Ingreso'),monto:Math.abs(m),q:parseInt(r[4])||0});
   });
 
   fijos=[];
   (results[3]||[]).slice(1).forEach(function(r){
-    var m=parseFloat(String(r[1]||'').replace(/[,$]/g,''));
+    var m=parseNum(r[1]);
     if(!r[0]||isNaN(m))return;
     fijos.push({nombre:String(r[0]),monto:m,dia:parseInt(r[2])||1,activo:String(r[3]||'SI').toUpperCase()!=='NO'});
   });
 
   ahorros=[];
   (results[4]||[]).slice(1).forEach(function(r){
-    var d=parseDate(r[0]),m=parseFloat(String(r[2]||'').replace(/[,$]/g,''));
+    var d=parseDate(r[0]),m=parseNum(r[2]);
     if(!d||isNaN(m))return;
     var tipo=String(r[4]||'Depósito');
     ahorros.push({fecha:d,concepto:String(r[1]||''),monto:Math.abs(m)*(tipo.toLowerCase().includes('retiro')?-1:1),meta:String(r[3]||'General'),tipo:tipo});
@@ -687,20 +719,20 @@ function parseAll(results){
   metas=[];
   (results[5]||[]).slice(1).forEach(function(r){
     if(!r[0])return;
-    metas.push({nombre:String(r[0]),meta:parseFloat(String(r[1]||'').replace(/[,$]/g,''))||0,actual:parseFloat(String(r[2]||'').replace(/[,$]/g,''))||0,limite:parseDate(r[3]),color:String(r[4]||'#4f8ef7')});
+    metas.push({nombre:String(r[0]),meta:parseNum(r[1])||0,actual:parseNum(r[2])||0,limite:parseDate(r[3]),color:String(r[4]||'#4f8ef7')});
   });
 
   prestamos=[];
   (results[6]||[]).slice(1).forEach(function(r){
     if(!r[0])return;
-    var capital=parseFloat(String(r[1]||'').replace(/[,$]/g,''))||0;
-    var total=parseFloat(String(r[2]||'').replace(/[,$]/g,''))||0;
+    var capital=parseNum(r[1])||0;
+    var total=parseNum(r[2])||0;
     var fi=parseDate(r[3]),fl=parseDate(r[4]);
     var dias=(fi&&fl)?dDiff(fi,fl):0,semanas=dias>0?dias/7:1,ganancia=total-capital;
     var tasaS=capital>0&&ganancia>0?ganancia/capital*100/semanas:0;
     var pagos=[];
     for(var ci=8;ci<r.length-1;ci+=2){
-      var pd=parseDate(r[ci]),pm=parseFloat(String(r[ci+1]||'').replace(/[,$]/g,''));
+      var pd=parseDate(r[ci]),pm=parseNum(r[ci+1]);
       if(pd&&!isNaN(pm)&&pm>0)pagos.push({fecha:pd,monto:pm});
     }
     var totalP=pagos.reduce(function(a,p){return a+p.monto;},0);
@@ -713,7 +745,7 @@ function parseAll(results){
     var shAp=[];
     results[7].forEach(function(r,idx){
       if(idx<14)return;
-      var fd=parseDate(r[0]),mo=parseFloat(String(r[2]||'').replace(/[,$]/g,''));
+      var fd=parseDate(r[0]),mo=parseNum(r[2]);
       if(!fd||isNaN(mo)||mo<=0)return;
       shAp.push({fecha:fd.toISOString().split('T')[0],quien:String(r[1]||'Ambos'),monto:mo,id:fd.getTime()+mo});
     });
