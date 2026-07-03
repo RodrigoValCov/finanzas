@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<title>Mi Dinero v2</title>
+<title>Mi Dinero</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
@@ -659,74 +659,87 @@ function setCfgStatus(msg,color){var el=document.getElementById('cfg-status');if
 
 /* ══ PARSE ══ */
 function parseAll(results){
-  cfg={nombre:'',ingresoQ:0,diaQ1:15,diaQ2:30};
+
+  function parseNum(v){
+    if(v===null||v===undefined||v==='')return NaN;
+    var s=String(v).trim().replace(/[$€£¥]/g,'').replace('MXN','').trim();
+    if(/\d+\.\d{3},\d{2}$/.test(s)){s=s.replace(/\./g,'').replace(',','.');}
+    else{s=s.replace(/,/g,'');}
+    return parseFloat(s);
+  }
+
+  // Auto-detecta desde qué fila empiezan los datos reales
+  function dataRows(rows, dateCol, numCol){
+    var start=0;
+    for(var i=0;i<Math.min(rows.length,6);i++){
+      var r=rows[i]; if(!r)continue;
+      var hasDate=dateCol!==undefined && parseDate(r[dateCol])!==null;
+      var hasNum=numCol!==undefined && !isNaN(parseNum(r[numCol])) && parseNum(r[numCol])>0;
+      if(hasDate||hasNum){start=i;break;}
+    }
+    return rows.slice(start).filter(function(r){return r&&r.some(function(c){return c!==null&&c!==''&&c!==undefined;});});
+  }
+
+  // CONFIG
+  cfg={nombre:'Rodrigo',ingresoQ:0,diaQ1:15,diaQ2:30};
   (results[0]||[]).forEach(function(r){
     var lbl=String(r[0]||'').toLowerCase(),v=r[1];
-    if(lbl.includes('nombre'))cfg.nombre=String(v||'');
-    if(lbl.includes('ingreso'))cfg.ingresoQ=parseFloat(String(v||'').replace(/[,$]/g,''))||0;
-    if(lbl.includes('q1'))cfg.diaQ1=parseInt(v)||15;
-    if(lbl.includes('q2'))cfg.diaQ2=parseInt(v)||30;
+    if(!v&&v!==0)return;
+    if(lbl.includes('nombre'))cfg.nombre=String(v);
+    else if(lbl.includes('ingreso'))cfg.ingresoQ=parseNum(v)||0;
+    else if(lbl.includes('q1')||lbl.includes('corte q1'))cfg.diaQ1=parseInt(v)||15;
+    else if(lbl.includes('q2')||lbl.includes('corte q2'))cfg.diaQ2=parseInt(v)||30;
   });
   if(cfg.nombre)document.getElementById('sb-user').textContent=cfg.nombre;
 
-  // Función robusta para parsear números de Google Sheets
-// Maneja: "15,000.00" / "$15,000" / "15000" / "15.000,00" (europeo) / "15"
-function parseNum(v){
-  if(v===null||v===undefined||v==='')return NaN;
-  var s=String(v).trim();
-  // Quitar símbolo de moneda y espacios
-  s=s.replace(/[$€£¥MXN\s]/g,'');
-  // Detectar formato europeo (punto como separador de miles, coma como decimal)
-  // Ej: "15.000,00" → tiene punto antes de coma
-  if(/\d+\.\d{3},\d{2}$/.test(s)){
-    s=s.replace(/\./g,'').replace(',','.');
-  } else {
-    // Formato anglosajón: quitar comas de miles
-    s=s.replace(/,/g,'');
-  }
-  return parseFloat(s);
-}
-
+  // GASTOS (fecha en col 0, monto en col 3)
   gastos=[];
-  (results[1]||[]).slice(1).forEach(function(r){
+  dataRows(results[1]||[],0,3).forEach(function(r){
     var d=parseDate(r[0]),m=parseNum(r[3]);
     if(!d||isNaN(m)||m===0)return;
     gastos.push({fecha:d,concepto:String(r[1]||'Sin concepto'),cat:String(r[2]||'Otros'),monto:Math.abs(m),q:parseInt(r[4])||0,tipo:String(r[5]||'Variable')});
   });
 
+  // INGRESOS (fecha en col 0, monto en col 3)
   ingresos=[];
-  (results[2]||[]).slice(1).forEach(function(r){
+  dataRows(results[2]||[],0,3).forEach(function(r){
     var d=parseDate(r[0]),m=parseNum(r[3]);
     if(!d||isNaN(m)||m===0)return;
     ingresos.push({fecha:d,concepto:String(r[1]||'Sin concepto'),cat:String(r[2]||'Ingreso'),monto:Math.abs(m),q:parseInt(r[4])||0});
   });
 
+  // GASTOS_FIJOS (nombre en col 0, monto en col 1)
   fijos=[];
-  (results[3]||[]).slice(1).forEach(function(r){
+  dataRows(results[3]||[],undefined,1).forEach(function(r){
     var m=parseNum(r[1]);
-    if(!r[0]||isNaN(m))return;
-    fijos.push({nombre:String(r[0]),monto:m,dia:parseInt(r[2])||1,activo:String(r[3]||'SI').toUpperCase()!=='NO'});
+    if(!r[0]||String(r[0]).trim()===''||isNaN(m)||m<=0)return;
+    fijos.push({nombre:String(r[0]).trim(),monto:m,dia:parseInt(r[2])||1,activo:String(r[3]||'SI').toUpperCase()!=='NO'});
   });
 
+  // AHORROS (fecha en col 0, monto en col 2)
   ahorros=[];
-  (results[4]||[]).slice(1).forEach(function(r){
+  dataRows(results[4]||[],0,2).forEach(function(r){
     var d=parseDate(r[0]),m=parseNum(r[2]);
     if(!d||isNaN(m))return;
-    var tipo=String(r[4]||'Depósito');
+    var tipo=String(r[4]||'Deposito');
     ahorros.push({fecha:d,concepto:String(r[1]||''),monto:Math.abs(m)*(tipo.toLowerCase().includes('retiro')?-1:1),meta:String(r[3]||'General'),tipo:tipo});
   });
 
+  // METAS (nombre en col 0, meta en col 1)
   metas=[];
-  (results[5]||[]).slice(1).forEach(function(r){
-    if(!r[0])return;
-    metas.push({nombre:String(r[0]),meta:parseNum(r[1])||0,actual:parseNum(r[2])||0,limite:parseDate(r[3]),color:String(r[4]||'#4f8ef7')});
+  dataRows(results[5]||[],undefined,1).forEach(function(r){
+    if(!r[0]||String(r[0]).trim()==='')return;
+    var meta=parseNum(r[1]),actual=parseNum(r[2]);
+    if(isNaN(meta)&&isNaN(actual))return;
+    metas.push({nombre:String(r[0]),meta:meta||0,actual:actual||0,limite:parseDate(r[3]),color:String(r[4]||'#4f8ef7')});
   });
 
+  // PRESTAMOS (nombre en col 0, capital en col 1)
   prestamos=[];
-  (results[6]||[]).slice(1).forEach(function(r){
-    if(!r[0])return;
-    var capital=parseNum(r[1])||0;
-    var total=parseNum(r[2])||0;
+  dataRows(results[6]||[],undefined,1).forEach(function(r){
+    if(!r[0]||String(r[0]).trim()==='')return;
+    var capital=parseNum(r[1])||0,total=parseNum(r[2])||0;
+    if(capital<=0&&total<=0)return;
     var fi=parseDate(r[3]),fl=parseDate(r[4]);
     var dias=(fi&&fl)?dDiff(fi,fl):0,semanas=dias>0?dias/7:1,ganancia=total-capital;
     var tasaS=capital>0&&ganancia>0?ganancia/capital*100/semanas:0;
@@ -740,11 +753,10 @@ function parseNum(v){
     prestamos.push({nombre:String(r[0]),capital:capital,total:total,fi:fi,fl:fl,periodo:String(r[5]||''),numPagos:parseInt(r[6])||0,notas:String(r[7]||''),ganancia:ganancia,semanas:+semanas.toFixed(1),tasaS:+tasaS.toFixed(2),tasaQ:+(tasaS*2).toFixed(2),tasaM:+(tasaS*4.33).toFixed(2),tasaT:capital>0?(ganancia/capital*100).toFixed(1):0,pagos:pagos,totalP:+totalP.toFixed(2),saldo:+saldo.toFixed(2),ven:ven,diasVen:ven?dDiff(fl,NOW):0,pct:total>0?Math.min(100,Math.round(totalP/total*100)):0});
   });
 
-  // AHORRO_CASA (hoja índice 7, datos desde fila 14)
-  if(results[7]&&results[7].length>14){
+  // AHORRO_CASA — detecta fila de datos por fecha en col 0
+  if(results[7]){
     var shAp=[];
-    results[7].forEach(function(r,idx){
-      if(idx<14)return;
+    dataRows(results[7],0,2).forEach(function(r){
       var fd=parseDate(r[0]),mo=parseNum(r[2]);
       if(!fd||isNaN(mo)||mo<=0)return;
       shAp.push({fecha:fd.toISOString().split('T')[0],quien:String(r[1]||'Ambos'),monto:mo,id:fd.getTime()+mo});
